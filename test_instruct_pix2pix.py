@@ -96,6 +96,15 @@ def main():
 
     # Process each image
     for i, image_path in enumerate(image_paths):
+        # Determine the expected output path for the current image
+        base_filename = os.path.basename(image_path)
+        output_path = os.path.join(output_folder, base_filename)
+
+        # Skip if the file has already been processed
+        if os.path.exists(output_path):
+            print(f"Skipping image {i+1}/{len(image_paths)} (already exists): {image_path}")
+            continue
+
         print(f"Processing image {i+1}/{len(image_paths)}: {image_path}")
         
         # Open the image and convert to RGB (Instruct-Pix2Pix expects RGB input)
@@ -107,8 +116,6 @@ def main():
         edited_image = pipe(prompt, image=input_image, num_inference_steps=num_inference_steps, image_guidance_scale=image_guidance_scale, generator=generator).images[0]
 
         # Save the output image
-        base_filename = os.path.basename(image_path)
-        output_path = os.path.join(output_folder, base_filename)
         edited_image.save(output_path)
 
     print("\nProcessing complete.")
