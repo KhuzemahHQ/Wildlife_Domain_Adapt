@@ -75,7 +75,7 @@ class CCTDataset(Dataset):
                 continue
             if check_greyscale(Image.open(full_path)):
                 if num_samples is None or self.len_grey < num_samples:
-                    self.grey_img_cat.append(1 if "bbox" in img_info.keys() else 0)
+                    self.grey_img_cat.append(img_info["n_boxes"] if "n_boxes" in img_info.keys() else 0)
                     self.grey_img.append(full_path)
                     self.len_grey += 1
             else:
@@ -223,8 +223,8 @@ def check_greyscale(img, threshold=1):
 
 # --- Configuration ---
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-IMAGE_DIR = "caltech_data/"
-JSON_PATH = "caltech_data/missouri_camera_traps_set1.json"
+IMAGE_DIR = "images/"
+JSON_PATH = "missouri_camera_traps_set1.json"
 
 # Training Hyperparameters
 N_EPOCHS = 10
