@@ -235,7 +235,7 @@ NUM_SAMPLES_TEST = 32
 
 # Loss Weights
 LAMBDA_CYCLE = 10.0
-LAMBDA_PERCEPTUAL = 1.0 # Weight for the new perceptual loss
+LAMBDA_PERCEPTUAL = 10.0 # Weight for the new perceptual loss
 
 # --- MegaDetector Feature Extractor ---
 class MegaDetectorFeatureExtractor(nn.Module):
@@ -306,7 +306,7 @@ def main():
     with open(JSON_PATH, 'r') as f:
         ann = json.load(f)
     ann_img = ann["images"]
-    train_idx = [i for i, img_info in enumerate(ann_img) if "n_boxes" not in img_info.keys()]
+    train_idx = [i for i in range(len(ann_img))]
     test_idx = [i for i, img_info in enumerate(ann_img) if "n_boxes" in img_info.keys()]
     np.random.seed(0)
     np.random.shuffle(train_idx)
@@ -366,8 +366,8 @@ def main():
             # We calculate perceptual loss on the reconstructed image `recov_X`
             # to ensure the A->B->A cycle preserves detector-relevant features.
             features_real_X = feature_extractor(real_X)
-            features_recov_X = feature_extractor(recov_X)
-            loss_perceptual = perceptual_criterion(features_recov_X, features_real_X)
+            features_fake_Y = feature_extractor(fake_Y)
+            loss_perceptual = perceptual_criterion(features_fake_Y, features_real_X)
 
             # --- Total Generator Loss ---
             # Add the new perceptual loss, weighted by its lambda
