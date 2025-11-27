@@ -15,7 +15,8 @@ from megadetector.detection.run_detector import load_detector
 from megadetector.visualization import visualization_utils as vis_utils
 
 # --- Class/Function Definitions (copied from train_cyclegan_perceptual.py) ---
-from train_cyclegan_perceptual import CCTDataset, UNetGenerator, check_greyscale
+from model import UNetGenerator
+from dataset import CCTDataset, check_greyscale
 
 # --- Configuration ---
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
