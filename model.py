@@ -95,7 +95,6 @@ class PatchDiscriminator(nn.Module):
         return self.model(x)
 
 
-# --- MegaDetector Feature Extractor ---
 class MegaDetectorFeatureExtractor(nn.Module):
     """
     A wrapper for MegaDetector to extract features from an intermediate layer.
@@ -111,8 +110,7 @@ class MegaDetectorFeatureExtractor(nn.Module):
 
         self.features = None
         # The layer name is specific to the YOLOv5 architecture used by MegaDetector.
-        # 'model.10' is part of the backbone, capturing mid-level features.
-        # This is a good candidate for structure-preserving features.
+        # 'model.10' is part of the backbone, capturing mid-level feature for structure-preserving features.
         layer_to_hook = self.detector.model.model[10]
         layer_to_hook.register_forward_hook(self.hook_fn)
         print(f"Hook registered on MegaDetector layer: {layer_to_hook.__class__.__name__}")
@@ -121,12 +119,9 @@ class MegaDetectorFeatureExtractor(nn.Module):
         self.features = output
 
     def forward(self, x):
-        # We only need the forward pass to trigger the hook, not the final detections.
-        # We run this with no_grad to save memory and computation, as we don't train the detector.
+        # run with no_grad to avoid updating the weights
         with torch.no_grad():
-            # The detector's forward pass is on its `.model` attribute.
-            # Input images need to be in the [0, 1] range for the detector.
-            # CycleGAN outputs are [-1, 1], so we rescale.
+            # Rescale from [-1, 1] to [0, 1]
             x_rescaled = (x + 1) / 2.0
             _ = self.detector.model(x_rescaled)
         return self.features

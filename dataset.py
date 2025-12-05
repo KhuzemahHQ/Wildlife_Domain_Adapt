@@ -40,11 +40,9 @@ class CCTDataset(Dataset):
         with open(json_path, 'r') as f:
             ann = json.load(f)
 
-        # Build image info list
-        # Each item: {'file_name': ..., 'location': <int or str>, ...}
         images_info = ann['images']
 
-        # Filter images by location into two domains
+        # Filter images by location into night and day
         self.night_img = []
         self.len_night = 0
         self.day_img = []
@@ -53,14 +51,15 @@ class CCTDataset(Dataset):
         selected_indices = indices
         for idx in selected_indices:
             img_info = images_info[idx]
-            # full path
             fn = img_info['file_name']
             full_path = os.path.join(image_dir, fn)
+            # skip missing files
             if not os.path.isfile(full_path):
-                # skip missing files
                 continue
+            # Keep track of image count to ensure balanced dataset for day and night
             if check_greyscale(Image.open(full_path)):
                 if num_samples is None or self.len_night < num_samples:
+                    # Number of boxes for detections
                     self.night_img_cat.append(img_info["n_boxes"] if "n_boxes" in img_info.keys() else 0)
                     self.night_img.append(full_path)
                     self.len_night += 1
@@ -80,7 +79,7 @@ class CCTDataset(Dataset):
         return self.dataset_length
 
     def __getitem__(self, idx):
-        # For unpaired: sample A and B independently (or aligned by idx mod list length)
+        # Incase of unbalanced dataset, loop over the smaller one
         pathA = self.night_img[idx % self.len_night]
         pathB = self.day_img[idx % self.len_day]
         catA = self.night_img_cat[idx % self.len_night]
@@ -95,11 +94,15 @@ class CCTDataset(Dataset):
     
     @staticmethod
     def generated_train_test_split(json_path): 
+        """
+        Generate train test split for dataset, ensuring n_boxes exists in test set to allow evaluation
+        """
         with open(json_path, 'r') as f:
             ann = json.load(f)
         ann_img = ann["images"]
         train_idx = [i for i, img_info in enumerate(ann_img) if "n_boxes" not in img_info.keys()]
         test_idx = [i for i, img_info in enumerate(ann_img) if "n_boxes" in img_info.keys()]
+        # Set seed for reproducibility
         np.random.seed(0)
         np.random.shuffle(train_idx)
         np.random.shuffle(test_idx)

@@ -21,5 +21,5 @@ eval:
 
   n_samples_test: 64
   batch_size: 1
-  detection_threshold: 0.25
-  eval_path: "eval_perceptual/"
+  detection_threshold: 0.25 # Threshold for MegaDetector confidence score
+  eval_path: "eval_perceptual/" # Output directory

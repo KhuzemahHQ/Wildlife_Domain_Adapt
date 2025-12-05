@@ -52,7 +52,6 @@ def main():
         lr=lr, betas=(0.5, 0.999)
     )
 
-    # --- DataLoaders ---
     # Load train/test indices from JSON
     train_idx, test_idx = CCTDataset.generated_train_test_split(json_path)
 
@@ -95,23 +94,22 @@ def main():
             fake_day = G_night_to_day(real_night)
             fake_night = G_day_to_night(real_day)
 
-            # Compute adversarial losses
+            # Compute adversarial loss for generated fake images
             loss_G_adv_day = adv_criterion(D_day(fake_day), torch.ones_like(D_day(fake_day)))
-            loss_G_adv_night = adv_criterion(D_night(real_night), torch.ones_like(D_night(real_night)))
+            loss_G_adv_night = adv_criterion(D_night(fake_night), torch.ones_like(D_night(fake_night)))
             loss_G_adv = (loss_G_adv_night + loss_G_adv_day)
 
-            # Compute Cycle-consistency losses
+            # Compute Cycle-consistency loss on reconstructed images
             recov_night = G_day_to_night(fake_day)
             recov_day = G_night_to_day(fake_night)
             loss_cycle = cycle_criterion(recov_night, real_night) + cycle_criterion(recov_day, real_day)
 
-            # Compute perceptual loss between real_day and fake_day
+            # Compute perceptual loss between real night and fake day
             features_real_night = feature_extractor(real_night)
             features_fake_night = feature_extractor(fake_night)
             loss_perceptual = perceptual_criterion(features_fake_night, features_real_night)
 
-            # --- Total Generator Loss ---
-            # Add the new perceptual loss, weighted by its lambda
+            # Add the cycle loss and perceptual loss, weighted by its lambda
             loss_G = (
                 loss_G_adv
                 + lambda_cycle * loss_cycle
@@ -120,17 +118,13 @@ def main():
             loss_G.backward()
             opt_G.step()
 
-            # -----------------------
-            #  Train Discriminators
-            # -----------------------
             opt_D.zero_grad()
-
-            # D_X
+            # Update night discriminator on real and fake night images
             loss_D_night_real = adv_criterion(D_night(real_night), torch.ones_like(D_night(real_night)))
             loss_D_night_fake = adv_criterion(D_night(fake_night.detach()), torch.zeros_like(D_night(fake_night)))
             loss_D_night = (loss_D_night_real + loss_D_night_fake) * 0.5
 
-            # D_Y
+            # Update day discriminator on real and fake day images
             loss_D_day_real = adv_criterion(D_day(real_day), torch.ones_like(D_day(real_day)))
             loss_D_day_fake = adv_criterion(D_day(fake_day.detach()), torch.zeros_like(D_day(fake_day)))
             loss_D_day = (loss_D_day_real + loss_D_day_fake) * 0.5
@@ -146,8 +140,7 @@ def main():
                 "loss_percept": f"{loss_perceptual.item():.3f}"
             })
 
-        # --- Save example outputs at end of epoch ---
-        # Use test_loader to get a consistent image for comparison across epochs
+        # Use test_loader to get a consistent image for comparison across epochs to visualize progress
         val_real_night, _, _ = next(iter(test_loader))
         val_real_night = val_real_night.to(DEVICE)
         
@@ -163,7 +156,7 @@ def main():
         save_image(val_fake_day * 0.5 + 0.5, os.path.join(image_save_path ,f"fake_day_epoch{epoch}.png"))
         save_image(val_recov_night * 0.5 + 0.5, os.path.join(image_save_path ,f"val_recov_night_epoch{epoch}.png"))
 
-        # --- Save model checkpoints ---
+        # Save models
         if (epoch + 1) % 5 == 0:
             torch.save(G_night_to_day.state_dict(), os.path.join(model_save_path ,f"G_night_to_day_epoch{epoch}.pth"))
             torch.save(G_day_to_night.state_dict(), os.path.join(model_save_path ,f"G_day_to_night_epoch{epoch}.pth"))

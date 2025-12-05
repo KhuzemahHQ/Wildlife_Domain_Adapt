@@ -17,7 +17,6 @@ from megadetector.visualization import visualization_utils as vis_utils
 from model import UNetGenerator
 from dataset import CCTDataset, check_greyscale
 
-# --- Configuration ---
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 def read_config(config_path: str) -> dict:
@@ -25,7 +24,7 @@ def read_config(config_path: str) -> dict:
         cf = yaml.safe_load(f)
     return cf
 
-# --- Helper function to draw results (from wildlife_domain_adapt.ipynb) ---
+# MegaDetector output mapping
 cat_map = {"1": "Animal", "2": "Person", "3": 'Vehicle'}
 
 def draw_result(img, result, path, display=False):
@@ -58,16 +57,16 @@ def main():
     config = config["eval"]
     print(f"Using device: {DEVICE}")
 
-    # --- Create output directory ---
+    # Create output directory
     eval_path = config["eval_path"]
     os.makedirs(eval_path, exist_ok=True)
     print(f"Evaluation outputs will be saved to: {eval_path}")
 
-    # --- Load MegaDetector ---
+    # Load MegaDetector
     print("Loading MegaDetector for evaluation...")
     detector = load_detector('MDV5A')
 
-    # --- Load Generator Model ---
+    # Load Generator Models
     model_path_G_night_to_day = config["model_path_G_night_to_day"]
     model_path_G_day_to_night = config["model_path_G_day_to_night"]
     if not os.path.exists(model_path_G_night_to_day):
@@ -88,7 +87,7 @@ def main():
     G_night_to_day.eval()
     G_day_to_night.eval()
 
-    # --- DataLoaders ---
+    # Create test dataset only
     _, test_idx = CCTDataset.generated_train_test_split(json_path)
 
     test_dataset = CCTDataset(
@@ -105,7 +104,7 @@ def main():
         print("Error: Test dataset is empty. Check paths and data curation.")
         return
 
-    # --- Evaluation Loop ---
+    # Evaluation Loop
     print(f"\nStarting evaluation on {len(test_dataset)} test images...")
     # [True Neg, False Neg, False Pos, True Pos]
     stats_real_night = [0, 0, 0, 0]  # For original NIR images
@@ -117,12 +116,12 @@ def main():
     for i, (real_night, _, cat_night) in loop:
         real_night = real_night.to(DEVICE)
         
-        # --- Generate Fake Image ---
+        # Generate fake images and reconstructed images 
         with torch.no_grad():
             fake_day = G_night_to_day(real_night)
             rec_night = G_day_to_night(fake_day)
 
-        # Save images to disk for MegaDetector to process
+        # Save images for MegaDetector to process
         real_night_path = os.path.join(eval_path, f"{i:03d}_real_night.png")
         fake_day_path = os.path.join(eval_path, f"{i:03d}_fake_day.png")
         rec_night_path = os.path.join(eval_path, f"{i:03d}_rec_night.png")
@@ -130,17 +129,17 @@ def main():
         save_image(fake_day * 0.5 + 0.5, fake_day_path)
         save_image(rec_night * 0.5 + 0.5, rec_night_path)
 
-        # Load images in a format suitable for MegaDetector's visualization
+        # Load images in a format suitable for MegaDetector
         img_night_pil = vis_utils.load_image(real_night_path)
         img_day_pil = vis_utils.load_image(fake_day_path)
         img_rec_pil = vis_utils.load_image(rec_night_path)
 
-        # --- Run Detection ---
+        # Run detection
         result_night = detector.generate_detections_one_image(img_night_pil, real_night_path)
         result_day = detector.generate_detections_one_image(img_day_pil, fake_day_path)
         result_rec = detector.generate_detections_one_image(img_rec_pil, rec_night_path)
 
-        # --- Process and Store Results ---
+        # Ground truth of animals in the images
         ground_truth_has_animal = cat_night.cpu().numpy()[0] > 0
 
         # Filter detections by confidence threshold
@@ -154,13 +153,12 @@ def main():
         draw_result(img_day_pil, detections_day, os.path.join(eval_path, f"{i:03d}_fake_day_det.png"))
         draw_result(img_rec_pil, detections_rec, os.path.join(eval_path, f"{i:03d}_rec_night_det.png"))
 
-        # Update statistics using the logic: (detection_present * 2) + ground_truth_present
-        # This maps to the [TN, FN, FP, TP] indices
+        # Update results which maps to the [TN, FN, FP, TP]
         stats_real_night[(len(detections_night) > 0) * 2 + ground_truth_has_animal] += 1
         stats_fake_day[(len(detections_day) > 0) * 2 + ground_truth_has_animal] += 1
         stats_rec_night[(len(detections_rec) > 0) * 2 + ground_truth_has_animal] += 1
 
-    # --- Calculate and Print Metrics ---
+    # Calculate metrics accuracy, precision, recall, F1-score
     print("\n--- Evaluation Results ---")
 
     def calculate_metrics(stats, name):
