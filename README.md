@@ -8,6 +8,7 @@ This is our project for the CSC2529 Computational Inmaging Course at the Univers
 - `train.py`: Script to run the training process
 - `evaluate.py`: Script to run the evaluation process
 - `config.yaml`: Contains hyperparameters and set up input and output directories
+- `experiments/` Contrain scripts or notebooks used for other experimentations
 
 # Data
 Missouri Camera Traps [[LILA link](http://lila.science/datasets/missouricameratraps)]
