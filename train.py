@@ -6,6 +6,7 @@ from torchvision.utils import save_image
 import numpy as np
 from tqdm import tqdm
 import os
+import yaml
 
 from model import UNetGenerator, PatchDiscriminator, MegaDetectorFeatureExtractor
 from dataset import CCTDataset
@@ -14,21 +15,18 @@ from dataset import CCTDataset
 
 # --- Configuration ---
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-IMAGE_DIR = "images/"
-JSON_PATH = "missouri_camera_traps_set1.json"
 
-# Training Hyperparameters
-N_EPOCHS = 10
-LR = 2e-4
-BATCH_SIZE = 1 # Perceptual loss with larger batches can be memory intensive
-NUM_SAMPLES_TRAIN = 1024
-NUM_SAMPLES_TEST = 32
-
-# Loss Weights
-LAMBDA_CYCLE = 10.0
-LAMBDA_PERCEPTUAL = 10.0 # Weight for the new perceptual loss
+def read_config(config_path: str) -> dict:
+    with open(config_path, "r") as f:
+        cf = yaml.safe_load(f)
+    return cf
 
 def main():
+    config = read_config("config.yaml")
+    image_dir = config["image_dir"]
+    json_path = config["json_path"]
+    config = config["train"]
+
     print(f"Using device: {DEVICE}")
 
     # --- Initialize Models ---
@@ -47,45 +45,50 @@ def main():
     perceptual_criterion = nn.L1Loss() # L1 loss between feature maps
 
     # --- Optimizers ---
+    lr = config["lr"]
     opt_G = optim.Adam(
         list(G_XtoY.parameters()) + list(G_YtoX.parameters()),
-        lr=LR, betas=(0.5, 0.999)
+        lr=lr, betas=(0.5, 0.999)
     )
     opt_D = optim.Adam(
         list(D_X.parameters()) + list(D_Y.parameters()),
-        lr=LR, betas=(0.5, 0.999)
+        lr=lr, betas=(0.5, 0.999)
     )
 
     # --- DataLoaders ---
     # Load train/test indices from JSON
-    train_idx, test_idx = CCTDataset.generated_train_test_split(JSON_PATH)
+    train_idx, test_idx = CCTDataset.generated_train_test_split(json_path)
 
     # Create datasets
     train_dataset = CCTDataset(
-        image_dir=IMAGE_DIR,
-        json_path=JSON_PATH,
+        image_dir=image_dir,
+        json_path=json_path,
         indices=train_idx,
-        num_samples=NUM_SAMPLES_TRAIN,
+        num_samples=config["n_samples_train"],
         image_size=512
     )
     test_dataset = CCTDataset(
-        image_dir=IMAGE_DIR,
-        json_path=JSON_PATH,
+        image_dir=image_dir,
+        json_path=json_path,
         indices=test_idx,
-        num_samples=NUM_SAMPLES_TEST,
+        num_samples=config["n_samples_train"],
         image_size=512,
         mode="test"
     )
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=config["batch_size"], shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
     # --- Create output directories ---
     os.makedirs("saved_models_perceptual", exist_ok=True)
     os.makedirs("saved_images_perceptual", exist_ok=True)
 
-
-    for epoch in range(N_EPOCHS):
-        loop = tqdm(train_loader, desc=f"Epoch [{epoch+1}/{N_EPOCHS}]")
+    n_epochs = config["n_epochs"]
+    lambda_cycle = config["lambda_cycle"]
+    lambda_perceptual = config["lambda_perceptual"]
+    model_save_path = config["model_save_path"]
+    image_save_path = config["image_save_path"]
+    for epoch in range(n_epochs):
+        loop = tqdm(train_loader, desc=f"Epoch [{epoch+1}/{n_epochs}]")
         for real_X, real_Y, _ in loop:
             real_X, real_Y = real_X.to(DEVICE), real_Y.to(DEVICE)
 
@@ -119,8 +122,8 @@ def main():
             # Add the new perceptual loss, weighted by its lambda
             loss_G = (
                 loss_G_adv
-                + LAMBDA_CYCLE * loss_cycle
-                + LAMBDA_PERCEPTUAL * loss_perceptual
+                + lambda_cycle * loss_cycle
+                + lambda_perceptual * loss_perceptual
             )
             loss_G.backward()
             opt_G.step()
@@ -164,33 +167,18 @@ def main():
         G_XtoY.train()
         G_YtoX.train()
 
-        save_image(val_real_X * 0.5 + 0.5, f"saved_images_perceptual/real_X_epoch{epoch}.png")
-        save_image(val_fake_Y * 0.5 + 0.5, f"saved_images_perceptual/fake_Y_epoch{epoch}.png")
-        save_image(val_recov_X * 0.5 + 0.5, f"saved_images_perceptual/recov_X_epoch{epoch}.png")
+        save_image(val_real_X * 0.5 + 0.5, os.path.join(image_save_path ,f"real_X_epoch{epoch}.png"))
+        save_image(val_fake_Y * 0.5 + 0.5, os.path.join(image_save_path ,f"fake_Y_epoch{epoch}.png"))
+        save_image(val_recov_X * 0.5 + 0.5, os.path.join(image_save_path ,f"recov_X_epoch{epoch}.png"))
 
         # --- Save model checkpoints ---
         if (epoch + 1) % 5 == 0:
-            torch.save(G_XtoY.state_dict(), f"saved_models_perceptual/G_XtoY_epoch{epoch}.pth")
-            torch.save(G_YtoX.state_dict(), f"saved_models_perceptual/G_YtoX_epoch{epoch}.pth")
-            torch.save(D_X.state_dict(), f"saved_models_perceptual/D_X_epoch{epoch}.pth")
-            torch.save(D_Y.state_dict(), f"saved_models_perceptual/D_Y_epoch{epoch}.pth")
+            torch.save(G_XtoY.state_dict(), os.path.join(model_save_path ,f"G_XtoY_epoch{epoch}.pth"))
+            torch.save(G_YtoX.state_dict(), os.path.join(model_save_path ,f"G_YtoX_epoch{epoch}.pth"))
+            torch.save(D_X.state_dict(), os.path.join(model_save_path ,f"D_X_epoch{epoch}.pth"))
+            torch.save(D_Y.state_dict(), os.path.join(model_save_path ,f"D_Y_epoch{epoch}.pth"))
 
     print("\nTraining complete.")
 
 if __name__ == "__main__":
-    # Note: The CCTDataset in the notebook needs a slight modification to accept indices.
-    # I've assumed this change is made in the imported `wildlife_domain_adapt.py`.
-    # The change is to pass `indices` to the CCTDataset constructor and use them
-    # instead of recalculating train/test splits inside `__init__`.
-    # This is a better practice for separating data logic from dataset class logic.
-    print("This script assumes `wildlife_domain_adapt.py` exists and its CCTDataset class")
-    print("has been modified to accept a list of indices in its constructor.")
-    
-    # To make this runnable, we need to convert the notebook to a .py file
-    # and adjust the CCTDataset class. For now, this script outlines the complete logic.
-    # To run, you would first convert the notebook and then execute:
-    # python train_cyclegan_perceptual.py
-    
-    # Since the notebook conversion is a prerequisite, I will comment out the main call
-    # to prevent errors if run directly without that step.
     main()

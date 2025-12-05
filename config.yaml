@@ -1,0 +1,25 @@
+image_dir: "images/"
+json_path: "missouri_camera_traps_set1.json"
+
+train:
+  # Training Hyperparameters
+  n_epochs: 10
+  lr: 2.0e-4
+  batch_size: 1
+  n_samples_train: 1024
+
+  # Loss Weights
+  lambda_cycle: 10.0 # Weight for the cycle consistency loss
+  lambda_perceptual: 10.0 # Weight for the perceptual loss
+
+  model_save_path: "saved_models_perceptual/"
+  image_save_path: "saved_images_perceptual/"
+
+eval:
+  model_path_G_XtoY: "saved_models_perceptual_5/G_XtoY_perceptual_lambda5.pth"
+  model_path_G_YtoX: "saved_models_perceptual_5/G_YtoX_perceptual_lambda5.pth"
+
+  n_samples_test: 64
+  batch_size: 1
+  detection_threshold: 0.25
+  eval_path: "eval_perceptual/"

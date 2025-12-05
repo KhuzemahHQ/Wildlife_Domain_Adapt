@@ -9,28 +9,21 @@ import os
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import yaml
 
-# --- MegaDetector Imports ---
 from megadetector.detection.run_detector import load_detector
 from megadetector.visualization import visualization_utils as vis_utils
 
-# --- Class/Function Definitions (copied from train_cyclegan_perceptual.py) ---
 from model import UNetGenerator
 from dataset import CCTDataset, check_greyscale
 
 # --- Configuration ---
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-IMAGE_DIR = "images/"
-JSON_PATH = "missouri_camera_traps_set1.json"
-NUM_SAMPLES_TEST = 64
-DETECTION_THRESHOLD = 0.25
 
-# --- Paths for models and outputs ---
-# Point this to the generator model you want to evaluate.
-# Assuming the last saved model from the 10-epoch training run.
-MODEL_PATH_G_XTOY = "saved_models_perceptual/G_XtoY_epoch9.pth"
-MODEL_PATH_G_YTOX = "saved_models_perceptual/G_YtoX_epoch9.pth"
-EVAL_OUTPUT_DIR = "eval_perceptual/"
+def read_config(config_path: str) -> dict:
+    with open(config_path, "r") as f:
+        cf = yaml.safe_load(f)
+    return cf
 
 # --- Helper function to draw results (from wildlife_domain_adapt.ipynb) ---
 cat_map = {"1": "Animal", "2": "Person", "3": 'Vehicle'}
@@ -59,48 +52,54 @@ def main():
     """
     Main function to evaluate the CycleGAN model on the downstream detection task.
     """
+    config = read_config("config.yaml")
+    image_dir = config["image_dir"]
+    json_path = config["json_path"]
+    config = config["eval"]
     print(f"Using device: {DEVICE}")
 
     # --- Create output directory ---
-    os.makedirs(EVAL_OUTPUT_DIR, exist_ok=True)
-    print(f"Evaluation outputs will be saved to: {EVAL_OUTPUT_DIR}")
+    eval_path = config["eval_path"]
+    os.makedirs(eval_path, exist_ok=True)
+    print(f"Evaluation outputs will be saved to: {eval_path}")
 
     # --- Load MegaDetector ---
     print("Loading MegaDetector for evaluation...")
     detector = load_detector('MDV5A')
 
     # --- Load Generator Model ---
-    if not os.path.exists(MODEL_PATH_G_XTOY):
-        print(f"Error: Model file not found at {MODEL_PATH_G_XTOY}")
+    model_path_G_XtoY = config["model_path_G_XtoY"]
+    model_path_G_YtoX = config["model_path_G_YtoX"]
+    if not os.path.exists(model_path_G_XtoY):
+        print(f"Error: Model file not found at {model_path_G_XtoY}")
+        print("Please ensure you have trained the model using train_cyclegan_perceptual.py first.")
+        return
+    
+    if not os.path.exists(model_path_G_XtoY):
+        print(f"Error: Model file not found at {model_path_G_XtoY}")
         print("Please ensure you have trained the model using train_cyclegan_perceptual.py first.")
         return
 
-    print(f"Loading generator model from: {MODEL_PATH_G_XTOY}")
+    print(f"Loading generator model from: {model_path_G_XtoY} and {model_path_G_YtoX}")
     G_XtoY = UNetGenerator().to(DEVICE)
     G_YtoX = UNetGenerator().to(DEVICE)
-    G_XtoY.load_state_dict(torch.load(MODEL_PATH_G_XTOY, map_location=DEVICE))
-    G_YtoX.load_state_dict(torch.load(MODEL_PATH_G_YTOX, map_location=DEVICE))
+    G_XtoY.load_state_dict(torch.load(model_path_G_XtoY, map_location=DEVICE))
+    G_YtoX.load_state_dict(torch.load(model_path_G_YtoX, map_location=DEVICE))
     G_XtoY.eval()
     G_YtoX.eval()
 
     # --- DataLoaders ---
-    with open(JSON_PATH, 'r') as f:
-        ann = json.load(f)
-    ann_img = ann["images"]
-    # Use the same test indices as in training for a fair comparison
-    test_idx = [i for i, img_info in enumerate(ann_img) if "n_boxes" in img_info.keys()]
-    np.random.seed(0) # Use the same seed to get the same shuffle
-    np.random.shuffle(test_idx)
+    _, test_idx = CCTDataset.generated_train_test_split(json_path)
 
     test_dataset = CCTDataset(
-        image_dir=IMAGE_DIR,
-        json_path=JSON_PATH,
+        image_dir=image_dir,
+        json_path=json_path,
         indices=test_idx,
-        num_samples=NUM_SAMPLES_TEST,
+        num_samples=config["n_samples_test"],
         image_size=512,
         mode="test"
     )
-    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=config["batch_size"], shuffle=False)
 
     if len(test_dataset) == 0:
         print("Error: Test dataset is empty. Check paths and data curation.")
@@ -114,6 +113,7 @@ def main():
     stats_rec_X = [0, 0, 0, 0]   # For reconstructed NIR images
 
     loop = tqdm(enumerate(test_loader), total=len(test_loader), desc="Evaluating")
+    detection_threshold = config["detection_threshold"]
     for i, (real_X, _, cat_X) in loop:
         real_X = real_X.to(DEVICE)
         
@@ -123,9 +123,9 @@ def main():
             rec_X = G_YtoX(fake_Y)
 
         # Save images to disk for MegaDetector to process
-        real_X_path = os.path.join(EVAL_OUTPUT_DIR, f"{i:03d}_real_X.png")
-        fake_Y_path = os.path.join(EVAL_OUTPUT_DIR, f"{i:03d}_fake_Y.png")
-        rec_X_path = os.path.join(EVAL_OUTPUT_DIR, f"{i:03d}_rec_X.png")
+        real_X_path = os.path.join(eval_path, f"{i:03d}_real_X.png")
+        fake_Y_path = os.path.join(eval_path, f"{i:03d}_fake_Y.png")
+        rec_X_path = os.path.join(eval_path, f"{i:03d}_rec_X.png")
         save_image(real_X * 0.5 + 0.5, real_X_path)
         save_image(fake_Y * 0.5 + 0.5, fake_Y_path)
         save_image(rec_X * 0.5 + 0.5, rec_X_path)
@@ -144,15 +144,15 @@ def main():
         ground_truth_has_animal = cat_X.cpu().numpy()[0] > 0
 
         # Filter detections by confidence threshold
-        detections_X = [d for d in result_X['detections'] if d['conf'] > DETECTION_THRESHOLD]
-        detections_Y = [d for d in result_Y['detections'] if d['conf'] > DETECTION_THRESHOLD]
-        detections_rec = [d for d in result_rec['detections'] if d['conf'] > DETECTION_THRESHOLD]
+        detections_X = [d for d in result_X['detections'] if d['conf'] > detection_threshold]
+        detections_Y = [d for d in result_Y['detections'] if d['conf'] > detection_threshold]
+        detections_rec = [d for d in result_rec['detections'] if d['conf'] > detection_threshold]
 
 
         # Draw results on images
-        draw_result(img_X_pil, detections_X, os.path.join(EVAL_OUTPUT_DIR, f"{i:03d}_real_X_det.png"))
-        draw_result(img_Y_pil, detections_Y, os.path.join(EVAL_OUTPUT_DIR, f"{i:03d}_fake_Y_det.png"))
-        draw_result(img_rec_pil, detections_rec, os.path.join(EVAL_OUTPUT_DIR, f"{i:03d}_rec_X_det.png"))
+        draw_result(img_X_pil, detections_X, os.path.join(eval_path, f"{i:03d}_real_X_det.png"))
+        draw_result(img_Y_pil, detections_Y, os.path.join(eval_path, f"{i:03d}_fake_Y_det.png"))
+        draw_result(img_rec_pil, detections_rec, os.path.join(eval_path, f"{i:03d}_rec_X_det.png"))
 
         # Update statistics using the logic: (detection_present * 2) + ground_truth_present
         # This maps to the [TN, FN, FP, TP] indices
