@@ -16,8 +16,8 @@ train:
   image_save_path: "saved_images_perceptual/"
 
 eval:
-  model_path_G_XtoY: "saved_models_perceptual_5/G_XtoY_perceptual_lambda5.pth"
-  model_path_G_YtoX: "saved_models_perceptual_5/G_YtoX_perceptual_lambda5.pth"
+  model_path_G_night_to_day: "saved_models_perceptual/G_night_to_day_epoch9.pth"
+  model_path_G_day_to_night: "saved_models_perceptual/G_day_to_night_epoch9.pth"
 
   n_samples_test: 64
   batch_size: 1

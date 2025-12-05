@@ -45,11 +45,11 @@ class CCTDataset(Dataset):
         images_info = ann['images']
 
         # Filter images by location into two domains
-        self.grey_img = []
-        self.len_grey = 0
-        self.col_img = []
-        self.len_col = 0
-        self.grey_img_cat = []
+        self.night_img = []
+        self.len_night = 0
+        self.day_img = []
+        self.len_day = 0
+        self.night_img_cat = []
         selected_indices = indices
         for idx in selected_indices:
             img_info = images_info[idx]
@@ -60,38 +60,38 @@ class CCTDataset(Dataset):
                 # skip missing files
                 continue
             if check_greyscale(Image.open(full_path)):
-                if num_samples is None or self.len_grey < num_samples:
-                    self.grey_img_cat.append(img_info["n_boxes"] if "n_boxes" in img_info.keys() else 0)
-                    self.grey_img.append(full_path)
-                    self.len_grey += 1
+                if num_samples is None or self.len_night < num_samples:
+                    self.night_img_cat.append(img_info["n_boxes"] if "n_boxes" in img_info.keys() else 0)
+                    self.night_img.append(full_path)
+                    self.len_night += 1
             else:
-                if num_samples is None or self.len_col < num_samples:
-                    self.col_img.append(full_path)
-                    self.len_col += 1
+                if num_samples is None or self.len_day < num_samples:
+                    self.day_img.append(full_path)
+                    self.len_day += 1
             if num_samples is None:
                 continue
-            elif self.len_col >= num_samples and self.len_grey >= num_samples:
+            elif self.len_day >= num_samples and self.len_night >= num_samples:
                 break
 
-        self.dataset_length = max(self.len_grey, self.len_col)
-        print(f"Greyscale img count: {self.len_grey}, Colour img count: {self.len_col}, using dataset length {self.dataset_length}")
+        self.dataset_length = max(self.len_night, self.len_day)
+        print(f"Nighttime img count: {self.len_night}, Daytime img count: {self.len_day}, using dataset length {self.dataset_length}")
         
     def __len__(self):
         return self.dataset_length
 
     def __getitem__(self, idx):
         # For unpaired: sample A and B independently (or aligned by idx mod list length)
-        pathA = self.grey_img[idx % self.len_grey]
-        pathB = self.col_img[idx % self.len_col]
-        catA = self.grey_img_cat[idx % self.len_grey]
+        pathA = self.night_img[idx % self.len_night]
+        pathB = self.day_img[idx % self.len_day]
+        catA = self.night_img_cat[idx % self.len_night]
 
-        img_grey = Image.open(pathA).convert('RGB')
-        img_col = Image.open(pathB).convert('RGB')
+        img_night = Image.open(pathA).convert('RGB')
+        img_day = Image.open(pathB).convert('RGB')
 
-        img_grey = self.transform(img_grey)
-        img_col = self.transform(img_col)
+        img_night = self.transform(img_night)
+        img_day = self.transform(img_day)
 
-        return img_grey, img_col, catA
+        return img_night, img_day, catA
     
     @staticmethod
     def generated_train_test_split(json_path): 
@@ -108,8 +108,7 @@ class CCTDataset(Dataset):
 
 def check_greyscale(img, threshold=1):
     """
-    Helper function to check if a PIL image is greyscale.
-    From wildlife_domain_adapt.ipynb.
+    Helper function to check if an image is greyscale.
     """
     arr = np.asarray(img, dtype=np.float32)
     # If the image has only one channel, it's greyscale

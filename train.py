@@ -10,10 +10,8 @@ import yaml
 
 from model import UNetGenerator, PatchDiscriminator, MegaDetectorFeatureExtractor
 from dataset import CCTDataset
-# --- Dataset and Model definitions from wildlife_domain_adapt.ipynb ---
 
 
-# --- Configuration ---
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 def read_config(config_path: str) -> dict:
@@ -29,29 +27,28 @@ def main():
 
     print(f"Using device: {DEVICE}")
 
-    # --- Initialize Models ---
-    # CycleGAN Generators and Discriminators
-    G_XtoY = UNetGenerator().to(DEVICE)
-    G_YtoX = UNetGenerator().to(DEVICE)
-    D_X = PatchDiscriminator().to(DEVICE)
-    D_Y = PatchDiscriminator().to(DEVICE)
+    # Initialize CycleGAN Generators and Discriminators
+    G_night_to_day = UNetGenerator().to(DEVICE)
+    G_day_to_night = UNetGenerator().to(DEVICE)
+    D_night = PatchDiscriminator().to(DEVICE)
+    D_day = PatchDiscriminator().to(DEVICE)
 
     # Perceptual Loss Model
     feature_extractor = MegaDetectorFeatureExtractor(device=DEVICE)
 
-    # --- Losses ---
+    # Initialize loss functions MSE for adversarial, L1 for cycle and perceptual
     adv_criterion = nn.MSELoss()
     cycle_criterion = nn.L1Loss()
-    perceptual_criterion = nn.L1Loss() # L1 loss between feature maps
+    perceptual_criterion = nn.L1Loss()
 
-    # --- Optimizers ---
+    # Adam optimizers with learning rate from config
     lr = config["lr"]
     opt_G = optim.Adam(
-        list(G_XtoY.parameters()) + list(G_YtoX.parameters()),
+        list(G_night_to_day.parameters()) + list(G_day_to_night.parameters()),
         lr=lr, betas=(0.5, 0.999)
     )
     opt_D = optim.Adam(
-        list(D_X.parameters()) + list(D_Y.parameters()),
+        list(D_night.parameters()) + list(D_day.parameters()),
         lr=lr, betas=(0.5, 0.999)
     )
 
@@ -78,7 +75,7 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=config["batch_size"], shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
-    # --- Create output directories ---
+    # Create output directories
     os.makedirs("saved_models_perceptual", exist_ok=True)
     os.makedirs("saved_images_perceptual", exist_ok=True)
 
@@ -89,34 +86,29 @@ def main():
     image_save_path = config["image_save_path"]
     for epoch in range(n_epochs):
         loop = tqdm(train_loader, desc=f"Epoch [{epoch+1}/{n_epochs}]")
-        for real_X, real_Y, _ in loop:
-            real_X, real_Y = real_X.to(DEVICE), real_Y.to(DEVICE)
+        for real_night, real_day, _ in loop:
+            real_night, real_day = real_night.to(DEVICE), real_day.to(DEVICE)
 
-            # -----------------------
-            #  Train Generators
-            # -----------------------
             opt_G.zero_grad()
 
             # Standard CycleGAN forward pass
-            fake_Y = G_XtoY(real_X)
-            fake_X = G_YtoX(real_Y)
+            fake_day = G_night_to_day(real_night)
+            fake_night = G_day_to_night(real_day)
 
-            # Adversarial losses
-            loss_G_adv_Y = adv_criterion(D_Y(fake_Y), torch.ones_like(D_Y(fake_Y)))
-            loss_G_adv_X = adv_criterion(D_X(fake_X), torch.ones_like(D_X(fake_X)))
-            loss_G_adv = (loss_G_adv_X + loss_G_adv_Y)
+            # Compute adversarial losses
+            loss_G_adv_day = adv_criterion(D_day(fake_day), torch.ones_like(D_day(fake_day)))
+            loss_G_adv_night = adv_criterion(D_night(real_night), torch.ones_like(D_night(real_night)))
+            loss_G_adv = (loss_G_adv_night + loss_G_adv_day)
 
-            # Cycle-consistency losses
-            recov_X = G_YtoX(fake_Y)
-            recov_Y = G_XtoY(fake_X)
-            loss_cycle = cycle_criterion(recov_X, real_X) + cycle_criterion(recov_Y, real_Y)
+            # Compute Cycle-consistency losses
+            recov_night = G_day_to_night(fake_day)
+            recov_day = G_night_to_day(fake_night)
+            loss_cycle = cycle_criterion(recov_night, real_night) + cycle_criterion(recov_day, real_day)
 
-            # --- NEW: Perceptual Loss Calculation ---
-            # We calculate perceptual loss on the reconstructed image `recov_X`
-            # to ensure the A->B->A cycle preserves detector-relevant features.
-            features_real_X = feature_extractor(real_X)
-            features_fake_Y = feature_extractor(fake_Y)
-            loss_perceptual = perceptual_criterion(features_fake_Y, features_real_X)
+            # Compute perceptual loss between real_day and fake_day
+            features_real_night = feature_extractor(real_night)
+            features_fake_night = feature_extractor(fake_night)
+            loss_perceptual = perceptual_criterion(features_fake_night, features_real_night)
 
             # --- Total Generator Loss ---
             # Add the new perceptual loss, weighted by its lambda
@@ -134,17 +126,17 @@ def main():
             opt_D.zero_grad()
 
             # D_X
-            loss_D_X_real = adv_criterion(D_X(real_X), torch.ones_like(D_X(real_X)))
-            loss_D_X_fake = adv_criterion(D_X(fake_X.detach()), torch.zeros_like(D_X(fake_X)))
-            loss_D_X = (loss_D_X_real + loss_D_X_fake) * 0.5
+            loss_D_night_real = adv_criterion(D_night(real_night), torch.ones_like(D_night(real_night)))
+            loss_D_night_fake = adv_criterion(D_night(fake_night.detach()), torch.zeros_like(D_night(fake_night)))
+            loss_D_night = (loss_D_night_real + loss_D_night_fake) * 0.5
 
             # D_Y
-            loss_D_Y_real = adv_criterion(D_Y(real_Y), torch.ones_like(D_Y(real_Y)))
-            loss_D_Y_fake = adv_criterion(D_Y(fake_Y.detach()), torch.zeros_like(D_Y(fake_Y)))
-            loss_D_Y = (loss_D_Y_real + loss_D_Y_fake) * 0.5
+            loss_D_day_real = adv_criterion(D_day(real_day), torch.ones_like(D_day(real_day)))
+            loss_D_day_fake = adv_criterion(D_day(fake_day.detach()), torch.zeros_like(D_day(fake_day)))
+            loss_D_day = (loss_D_day_real + loss_D_day_fake) * 0.5
 
             # Total Discriminator Loss
-            loss_D = loss_D_X + loss_D_Y
+            loss_D = loss_D_night + loss_D_day
             loss_D.backward()
             opt_D.step()
 
@@ -156,27 +148,27 @@ def main():
 
         # --- Save example outputs at end of epoch ---
         # Use test_loader to get a consistent image for comparison across epochs
-        val_real_X, _, _ = next(iter(test_loader))
-        val_real_X = val_real_X.to(DEVICE)
+        val_real_night, _, _ = next(iter(test_loader))
+        val_real_night = val_real_night.to(DEVICE)
         
-        G_XtoY.eval()
-        G_YtoX.eval()
+        G_night_to_day.eval()
+        G_day_to_night.eval()
         with torch.no_grad():
-            val_fake_Y = G_XtoY(val_real_X)
-            val_recov_X = G_YtoX(val_fake_Y)
-        G_XtoY.train()
-        G_YtoX.train()
+            val_fake_day = G_night_to_day(val_real_night)
+            val_recov_night = G_day_to_night(val_fake_day)
+        G_night_to_day.train()
+        G_day_to_night.train()
 
-        save_image(val_real_X * 0.5 + 0.5, os.path.join(image_save_path ,f"real_X_epoch{epoch}.png"))
-        save_image(val_fake_Y * 0.5 + 0.5, os.path.join(image_save_path ,f"fake_Y_epoch{epoch}.png"))
-        save_image(val_recov_X * 0.5 + 0.5, os.path.join(image_save_path ,f"recov_X_epoch{epoch}.png"))
+        save_image(val_real_night * 0.5 + 0.5, os.path.join(image_save_path ,f"real_night_epoch{epoch}.png"))
+        save_image(val_fake_day * 0.5 + 0.5, os.path.join(image_save_path ,f"fake_day_epoch{epoch}.png"))
+        save_image(val_recov_night * 0.5 + 0.5, os.path.join(image_save_path ,f"val_recov_night_epoch{epoch}.png"))
 
         # --- Save model checkpoints ---
         if (epoch + 1) % 5 == 0:
-            torch.save(G_XtoY.state_dict(), os.path.join(model_save_path ,f"G_XtoY_epoch{epoch}.pth"))
-            torch.save(G_YtoX.state_dict(), os.path.join(model_save_path ,f"G_YtoX_epoch{epoch}.pth"))
-            torch.save(D_X.state_dict(), os.path.join(model_save_path ,f"D_X_epoch{epoch}.pth"))
-            torch.save(D_Y.state_dict(), os.path.join(model_save_path ,f"D_Y_epoch{epoch}.pth"))
+            torch.save(G_night_to_day.state_dict(), os.path.join(model_save_path ,f"G_night_to_day_epoch{epoch}.pth"))
+            torch.save(G_day_to_night.state_dict(), os.path.join(model_save_path ,f"G_day_to_night_epoch{epoch}.pth"))
+            torch.save(D_night.state_dict(), os.path.join(model_save_path ,f"D_night_epoch{epoch}.pth"))
+            torch.save(D_day.state_dict(), os.path.join(model_save_path ,f"D_day_epoch{epoch}.pth"))
 
     print("\nTraining complete.")
 
